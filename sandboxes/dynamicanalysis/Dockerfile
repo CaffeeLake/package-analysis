@@ -4,8 +4,8 @@
 # NO_PUBKEY EB3E94ADBE1229CF [powershell]
 # NO_PUBKEY B53DC80D13EDEF05 [kubectl]
 
-# buildpack-deps 22.04 [ubuntu]
-FROM buildpack-deps@sha256:e3a9f4d68852ea0111610b75443f6eb809c28816b04088722f9a079a49cf1287 AS image
+# buildpack-deps 24.04 [ubuntu]
+FROM buildpack-deps:24.04@sha256:48a08de20b86d99a39f413b3b8521f3ca741487d2d9d7394b6d4ab8a7498cc15 AS image
 
 # All intermediate files during first-stage build are stored under /setup
 # This directory is removed before second-stage build (i.e. copying runtime files to an empty image)
@@ -37,7 +37,6 @@ RUN curl -fsSL "https://packages.microsoft.com/config/ubuntu/22.04/packages-micr
 RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-recommends \
 	apt-transport-https \
 	auditd \
-	awscli \
 	build-essential \
 	cmake \
 	clang \
@@ -49,10 +48,9 @@ RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-reco
 	libpng-dev \
 	libzip-dev \
 	net-tools \
-	netcat \
+	netcat-openbsd \
 	powershell \
 	protobuf-compiler \
-	python2 \
 	sshpass \
 	sudo \
 	tcpdump \
@@ -62,11 +60,17 @@ RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-reco
 	xxd \
 	zip
 
+
 # Configure sudo for passwordless execution
 RUN echo "ALL ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
-# Create ssh directory for root
-RUN mkdir -m 0700 /root/.ssh
+
+# install awscli v2
+# TODO: validate the integrity of the archive
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/setup/awscliv2.zip"
+RUN unzip "/setup/awscliv2.zip" -d "/setup"
+RUN /setup/aws/install
+
 
 #
 # PHP setup
@@ -102,12 +106,14 @@ WORKDIR /setup/python
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	python3 \
 	python3-dev \
-	python3-pip
+	python3-venv
+
+# Create a virtual environment to allow pip install to work.
+RUN python3 -m venv /app/.pyenv
 
 # Some Python packages expect certain dependencies to already be installed
 COPY pypi-packages.txt ./
-RUN pip install --require-hashes --requirement pypi-packages.txt
-
+RUN /app/.pyenv/bin/pip install --require-hashes --requirement pypi-packages.txt
 
 #
 # Rubygems setup
@@ -138,6 +144,10 @@ RUN rm -rf /setup
 FROM scratch
 COPY --from=image / /
 WORKDIR /app
+
+# Python
+# Use the Python virtual environment for all Python.
+ENV PATH="/app/.pyenv/bin:${PATH}"
 
 # Rust
 ENV PATH="/usr/local/cargo/bin:${PATH}"
